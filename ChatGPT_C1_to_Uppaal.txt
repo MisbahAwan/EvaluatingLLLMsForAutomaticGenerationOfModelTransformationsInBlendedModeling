@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE nta PUBLIC "-//Uppaal Team//DTD Flat System 1.1//EN" "http://www.it.uu.se/research/group/darts/uppaal/flat-1_2.dtd">
+<nta>
+<declaration><![CDATA[
+const int DESIRED_SPEED_INCREMENT=1, MAX_SPEED=150, MIN_SPEED=30, THROTTLE_MAX=100, THROTTLE_MIN=0;
+int currentSpeed=0, desiredSpeed=0, throttle=0;
+bool setButtonPressed=false, increaseSpeed=false, decreaseSpeed=false, cancelButtonPressed=false;
+chan tick;
+]]></declaration>
+<template><name>CruiseControl</name><declaration>clock t;</declaration>
+<location id="off"><name>CRUISE_OFF</name><label kind="invariant">t&lt;=1</label></location>
+<location id="on"><name>CRUISE_ON</name><label kind="invariant">t&lt;=1</label></location>
+<location id="hold"><name>CRUISE_HOLD</name><label kind="invariant">t&lt;=1</label></location>
+<init ref="off"/>
+<transition><source ref="off"/><target ref="on"/><label kind="guard">setButtonPressed &amp;&amp; currentSpeed&gt;=MIN_SPEED</label><label kind="synchronisation">tick?</label><label kind="assignment">desiredSpeed=currentSpeed,t=0</label></transition>
+<transition><source ref="off"/><target ref="off"/><label kind="guard">!(setButtonPressed &amp;&amp; currentSpeed&gt;=MIN_SPEED)</label><label kind="synchronisation">tick?</label><label kind="assignment">t=0</label></transition>
+<transition><source ref="on"/><target ref="off"/><label kind="guard">cancelButtonPressed</label><label kind="synchronisation">tick?</label><label kind="assignment">throttle=0,t=0</label></transition>
+<transition><source ref="on"/><target ref="on"/><label kind="guard">!cancelButtonPressed &amp;&amp; increaseSpeed</label><label kind="synchronisation">tick?</label><label kind="assignment">desiredSpeed=(desiredSpeed&lt;MAX_SPEED)?desiredSpeed+DESIRED_SPEED_INCREMENT:MAX_SPEED,t=0</label></transition>
+<transition><source ref="on"/><target ref="on"/><label kind="guard">!cancelButtonPressed &amp;&amp; !increaseSpeed &amp;&amp; decreaseSpeed</label><label kind="synchronisation">tick?</label><label kind="assignment">desiredSpeed=(desiredSpeed&gt;MIN_SPEED)?desiredSpeed-DESIRED_SPEED_INCREMENT:MIN_SPEED,t=0</label></transition>
+<transition><source ref="on"/><target ref="hold"/><label kind="guard">!cancelButtonPressed &amp;&amp; !increaseSpeed &amp;&amp; !decreaseSpeed</label><label kind="synchronisation">tick?</label><label kind="assignment">t=0</label></transition>
+<transition><source ref="hold"/><target ref="off"/><label kind="guard">cancelButtonPressed</label><label kind="synchronisation">tick?</label><label kind="assignment">throttle=0,t=0</label></transition>
+<transition><source ref="hold"/><target ref="hold"/><label kind="guard">!cancelButtonPressed &amp;&amp; desiredSpeed&gt;currentSpeed</label><label kind="synchronisation">tick?</label><label kind="assignment">throttle=(throttle+desiredSpeed-currentSpeed&gt;THROTTLE_MAX)?THROTTLE_MAX:throttle+desiredSpeed-currentSpeed,t=0</label></transition>
+<transition><source ref="hold"/><target ref="hold"/><label kind="guard">!cancelButtonPressed &amp;&amp; desiredSpeed&lt;currentSpeed</label><label kind="synchronisation">tick?</label><label kind="assignment">throttle=(throttle+desiredSpeed-currentSpeed&lt;THROTTLE_MIN)?THROTTLE_MIN:throttle+desiredSpeed-currentSpeed,t=0</label></transition>
+<transition><source ref="hold"/><target ref="hold"/><label kind="guard">!cancelButtonPressed &amp;&amp; desiredSpeed==currentSpeed</label><label kind="synchronisation">tick?</label><label kind="assignment">t=0</label></transition>
+</template>
+<template><name>Environment</name><declaration>clock e;</declaration><location id="run"><name>RUN</name><label kind="invariant">e&lt;=1</label></location><init ref="run"/>
+<transition><source ref="run"/><target ref="run"/><label kind="guard">e&gt;=1</label><label kind="synchronisation">tick!</label><label kind="assignment">e=0,setButtonPressed=false,increaseSpeed=false,decreaseSpeed=false,cancelButtonPressed=false</label></transition>
+</template>
+<system><![CDATA[C=CruiseControl(); E=Environment(); system C,E;]]></system>
+<queries>
+<query><formula>A[] throttle&gt;=THROTTLE_MIN &amp;&amp; throttle&lt;=THROTTLE_MAX</formula><comment>Throttle bounds.</comment></query>
+<query><formula>A[] desiredSpeed&lt;=MAX_SPEED</formula><comment>Maximum desired speed.</comment></query>
+<query><formula>A[] (desiredSpeed==0 || desiredSpeed&gt;=MIN_SPEED)</formula><comment>Desired speed lower bound.</comment></query>
+<query><formula>A[] (CruiseControl.CRUISE_OFF imply throttle==0)</formula><comment>Throttle is zero when OFF.</comment></query>
+</queries></nta>

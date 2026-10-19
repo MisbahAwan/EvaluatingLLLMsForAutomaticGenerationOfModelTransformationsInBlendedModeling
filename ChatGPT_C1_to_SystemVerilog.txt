@@ -1,0 +1,44 @@
+module cruise_control(
+ input logic clk,input logic rst_n,input logic [7:0] current_speed,
+ input logic set_button_pressed,input logic increase_speed,input logic decrease_speed,input logic cancel_button_pressed,
+ output logic [7:0] desired_speed,output logic [7:0] throttle,output logic [1:0] state);
+localparam logic [7:0] DESIRED_SPEED_INCREMENT=8'd1,MAX_SPEED=8'd150,MIN_SPEED=8'd30,THROTTLE_MAX=8'd100,THROTTLE_MIN=8'd0;
+typedef enum logic [1:0]{CRUISE_OFF=2'b00,CRUISE_ON=2'b01,CRUISE_HOLD=2'b10} cruise_state_t;
+cruise_state_t state_reg,next_state;
+logic signed [8:0] speed_difference;
+logic signed [9:0] throttle_next;
+assign state=state_reg;
+always_comb begin
+ next_state=state_reg;
+ case(state_reg)
+  CRUISE_OFF: if(set_button_pressed && current_speed>=MIN_SPEED) next_state=CRUISE_ON;
+  CRUISE_ON: if(cancel_button_pressed) next_state=CRUISE_OFF; else if(!increase_speed && !decrease_speed) next_state=CRUISE_HOLD;
+  CRUISE_HOLD: if(cancel_button_pressed) next_state=CRUISE_OFF;
+  default: next_state=CRUISE_OFF;
+ endcase
+end
+always_comb begin
+ speed_difference=$signed({1'b0,desired_speed})-$signed({1'b0,current_speed});
+ throttle_next=$signed({2'b00,throttle});
+ if(speed_difference>0) throttle_next=$signed({2'b00,throttle})+speed_difference;
+ else if(speed_difference<0) throttle_next=$signed({2'b00,throttle})+speed_difference;
+ if(throttle_next>$signed({2'b00,THROTTLE_MAX})) throttle_next=$signed({2'b00,THROTTLE_MAX});
+ else if(throttle_next<$signed({2'b00,THROTTLE_MIN})) throttle_next=$signed({2'b00,THROTTLE_MIN});
+end
+always_ff @(posedge clk or negedge rst_n) begin
+ if(!rst_n) begin state_reg<=CRUISE_OFF; desired_speed<=0; throttle<=0; end
+ else begin
+  state_reg<=next_state;
+  case(state_reg)
+   CRUISE_OFF: begin throttle<=0; if(set_button_pressed && current_speed>=MIN_SPEED) desired_speed<=current_speed; end
+   CRUISE_ON: begin
+    if(cancel_button_pressed) throttle<=0;
+    else if(increase_speed) begin if(desired_speed<MAX_SPEED) desired_speed<=desired_speed+DESIRED_SPEED_INCREMENT; else desired_speed<=MAX_SPEED; end
+    else if(decrease_speed) begin if(desired_speed>MIN_SPEED) desired_speed<=desired_speed-DESIRED_SPEED_INCREMENT; else desired_speed<=MIN_SPEED; end
+   end
+   CRUISE_HOLD: begin if(cancel_button_pressed) throttle<=0; else throttle<=throttle_next[7:0]; end
+   default: begin desired_speed<=0; throttle<=0; end
+  endcase
+ end
+end
+endmodule

@@ -1,0 +1,146 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE nta PUBLIC "-//Uppsala University//DTD UPPAAL 4.0//EN" "http://www.it.uu.se/research/group/darts/Uppaal/flat.dtd">
+<nta>
+  <declaration>const int MIN_SPEED = 30;
+const int MAX_SPEED = 150;
+const int THROTTLE_MIN = 0;
+const int THROTTLE_MAX = 100;
+const int SPEED_BOUND = 160;
+const int PERIOD = 1;
+
+int[0, SPEED_BOUND] currentSpeed = 0;
+int[0, SPEED_BOUND] desiredSpeed = 0;
+int[THROTTLE_MIN, THROTTLE_MAX] throttle = 0;
+
+bool isSet(int b) { return b % 2 == 1; }
+bool isInc(int b) { return (b / 2) % 2 == 1; }
+bool isDec(int b) { return (b / 4) % 2 == 1; }
+bool isCancel(int b) { return (b / 8) % 2 == 1; }
+
+int clampSpeed(int x)
+{
+    if (x &lt; 0) return 0;
+    if (x &gt; SPEED_BOUND) return SPEED_BOUND;
+    return x;
+}
+
+int clampThrottle(int x)
+{
+    if (x &lt; THROTTLE_MIN) return THROTTLE_MIN;
+    if (x &gt; THROTTLE_MAX) return THROTTLE_MAX;
+    return x;
+}
+</declaration>
+
+  <template>
+    <name x="5" y="5">CruiseControl</name>
+    <declaration>clock c;</declaration>
+
+    <location id="id0" x="-240" y="0">
+      <name x="-250" y="-30">Off</name>
+      <label kind="invariant" x="-250" y="10">c &lt;= PERIOD</label>
+    </location>
+
+    <location id="id1" x="0" y="0">
+      <name x="-10" y="-30">On</name>
+      <label kind="invariant" x="-10" y="10">c &lt;= PERIOD</label>
+    </location>
+
+    <location id="id2" x="240" y="0">
+      <name x="230" y="-30">Hold</name>
+      <label kind="invariant" x="230" y="10">c &lt;= PERIOD</label>
+    </location>
+
+    <init ref="id0"/>
+
+    <!-- Off -> On : set button pressed and currentSpeed >= MIN_SPEED -->
+    <transition>
+      <source ref="id0"/>
+      <target ref="id1"/>
+      <label kind="select" x="-220" y="-110">b : int[0,15], d : int[-2,2]</label>
+      <label kind="guard" x="-220" y="-90">c &gt;= PERIOD &amp;&amp; isSet(b) &amp;&amp; currentSpeed &gt;= MIN_SPEED</label>
+      <label kind="assignment" x="-220" y="-70">desiredSpeed := currentSpeed,
+c := 0,
+currentSpeed := clampSpeed(currentSpeed + d)</label>
+    </transition>
+
+    <!-- Off -> Off : no valid activation -->
+    <transition>
+      <source ref="id0"/>
+      <target ref="id0"/>
+      <label kind="select" x="-380" y="-80">b : int[0,15], d : int[-2,2]</label>
+      <label kind="guard" x="-380" y="-60">c &gt;= PERIOD &amp;&amp; !(isSet(b) &amp;&amp; currentSpeed &gt;= MIN_SPEED)</label>
+      <label kind="assignment" x="-380" y="-40">c := 0,
+currentSpeed := clampSpeed(currentSpeed + d)</label>
+    </transition>
+
+    <!-- On -> Off : cancel -->
+    <transition>
+      <source ref="id1"/>
+      <target ref="id0"/>
+      <label kind="select" x="-160" y="80">b : int[0,15], d : int[-2,2]</label>
+      <label kind="guard" x="-160" y="100">c &gt;= PERIOD &amp;&amp; isCancel(b)</label>
+      <label kind="assignment" x="-160" y="120">throttle := 0,
+c := 0,
+currentSpeed := clampSpeed(currentSpeed + d)</label>
+    </transition>
+
+    <!-- On -> On : increase desired speed -->
+    <transition>
+      <source ref="id1"/>
+      <target ref="id1"/>
+      <label kind="select" x="-80" y="-160">b : int[0,15], d : int[-2,2]</label>
+      <label kind="guard" x="-80" y="-140">c &gt;= PERIOD &amp;&amp; !isCancel(b) &amp;&amp; isInc(b)</label>
+      <label kind="assignment" x="-80" y="-120">desiredSpeed := (desiredSpeed + 1 &gt; MAX_SPEED) ? MAX_SPEED : desiredSpeed + 1,
+c := 0,
+currentSpeed := clampSpeed(currentSpeed + d)</label>
+    </transition>
+
+    <!-- On -> On : decrease desired speed -->
+    <transition>
+      <source ref="id1"/>
+      <target ref="id1"/>
+      <label kind="select" x="-80" y="160">b : int[0,15], d : int[-2,2]</label>
+      <label kind="guard" x="-80" y="180">c &gt;= PERIOD &amp;&amp; !isCancel(b) &amp;&amp; !isInc(b) &amp;&amp; isDec(b)</label>
+      <label kind="assignment" x="-80" y="200">desiredSpeed := (desiredSpeed - 1 &lt; MIN_SPEED) ? MIN_SPEED : desiredSpeed - 1,
+c := 0,
+currentSpeed := clampSpeed(currentSpeed + d)</label>
+    </transition>
+
+    <!-- On -> Hold : no cancel/increase/decrease -->
+    <transition>
+      <source ref="id1"/>
+      <target ref="id2"/>
+      <label kind="select" x="40" y="-80">b : int[0,15], d : int[-2,2]</label>
+      <label kind="guard" x="40" y="-60">c &gt;= PERIOD &amp;&amp; !isCancel(b) &amp;&amp; !isInc(b) &amp;&amp; !isDec(b)</label>
+      <label kind="assignment" x="40" y="-40">c := 0,
+currentSpeed := clampSpeed(currentSpeed + d)</label>
+    </transition>
+
+    <!-- Hold -> Off : cancel -->
+    <transition>
+      <source ref="id2"/>
+      <target ref="id0"/>
+      <label kind="select" x="80" y="80">b : int[0,15], d : int[-2,2]</label>
+      <label kind="guard" x="80" y="100">c &gt;= PERIOD &amp;&amp; isCancel(b)</label>
+      <label kind="assignment" x="80" y="120">throttle := 0,
+c := 0,
+currentSpeed := clampSpeed(currentSpeed + d)</label>
+    </transition>
+
+    <!-- Hold -> Hold : throttle control -->
+    <transition>
+      <source ref="id2"/>
+      <target ref="id2"/>
+      <label kind="select" x="320" y="-80">b : int[0,15], d : int[-2,2]</label>
+      <label kind="guard" x="320" y="-60">c &gt;= PERIOD &amp;&amp; !isCancel(b)</label>
+      <label kind="assignment" x="320" y="-40">throttle := clampThrottle(throttle + desiredSpeed - currentSpeed),
+c := 0,
+currentSpeed := clampSpeed(currentSpeed + d)</label>
+    </transition>
+
+  </template>
+
+  <system>cruise = CruiseControl();
+system cruise;</system>
+</nta>

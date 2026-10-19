@@ -1,0 +1,157 @@
+<nta>
+<declaration> // ============================================================ // UPPAAL model of the Cruise Control embedded C module // (source: C1_Casestudy.txt -- updateCruiseControl / controlThrottle) // // This version of the C source is well-formed: every case in // switch(state) ends with break, so there is NO fall-through // (unlike an earlier draft of this file that omitted break). // This model is therefore a single faithful controller, directly // mirroring the switch/case structure one-to-one. // ============================================================ // ---- Constants (from #define in the C source) ---- const int DESIRED_SPEED_INCREMENT = 1; const int MAX_SPEED = 150; const int MIN_SPEED = 30; const int THROTTLE_MAX = 100; const int THROTTLE_MIN = 0; const int SPEED_CAP = 200; // physical bound, bounds the environment's search space only // ---- State encoding (mirrors: typedef enum {CRUISE_OFF, CRUISE_ON, CRUISE_HOLD} CruiseState) ---- const int CRUISE_OFF = 0; const int CRUISE_ON = 1; const int CRUISE_HOLD = 2; // ---- Plant / driver inputs (written by Environment, read by the controller) ---- int currentSpeed = 0; bool setButtonPressed = false; bool increaseSpeed = false; bool decreaseSpeed = false; bool cancelButtonPressed = false; // ---- Controller state (== globals currentSpeed/desiredSpeed/throttle/state in the C file) ---- int desiredSpeed = 0; int throttle = 0; int state = CRUISE_OFF; int speedDifference = 0; // Broadcast channel: Environment signals "one sampling period elapsed, inputs ready" broadcast chan go; // ---- Helper functions (translated 1:1 from the C functions) ---- // Direct translation of controlThrottle(int speedDifference) void controlThrottle(int diff) { if (diff > 0) { throttle += diff; } else if (diff < 0) { throttle += diff; } if (throttle > THROTTLE_MAX) throttle = THROTTLE_MAX; if (throttle < THROTTLE_MIN) throttle = THROTTLE_MIN; } // Translation of the "increaseSpeed" branch inside case CRUISE_ON void incDesired() { desiredSpeed += DESIRED_SPEED_INCREMENT; if (desiredSpeed > MAX_SPEED) desiredSpeed = MAX_SPEED; } // Translation of the "decreaseSpeed" branch inside case CRUISE_ON void decDesired() { desiredSpeed -= DESIRED_SPEED_INCREMENT; if (desiredSpeed < MIN_SPEED) desiredSpeed = MIN_SPEED; } // Translation of the test-harness speed ramp in main() (currentSpeed += / -= 2), // generalised to a bounded nondeterministic delta so the model explores the full // reachable input space, not just the one fixed trace hard-coded in main(). void updateSpeed(int delta) { currentSpeed += delta; if (currentSpeed < 0) currentSpeed = 0; if (currentSpeed > SPEED_CAP) currentSpeed = SPEED_CAP; } </declaration>
+<template>
+<name>Environment</name>
+<declaration> // Periodic driver of the control loop. Models the for(i=0;i<20;i++){ ... delay ... } // loop in main() as one abstract sampling period PERIOD, and generalises the fixed // scripted inputs used in main() (setButtonPressed at i==2, increaseSpeed at i==5, // decreaseSpeed at i==7, cancelButtonPressed at i==12, currentSpeed +/-2 per step) // into bounded nondeterministic choices, so every reachable input sequence is explored. clock x; const int PERIOD = 10; </declaration>
+<location id="id0" x="0" y="0">
+<name x="-10" y="-34">Idle</name>
+<label kind="invariant" x="-10" y="10">x<=PERIOD</label>
+</location>
+<location id="id1" x="200" y="0">
+<name x="190" y="-34">Sample</name>
+</location>
+<committed ref="id1"/>
+<init ref="id0"/>
+<transition>
+<source ref="id0"/>
+<target ref="id1"/>
+<label kind="guard" x="40" y="-40">x==PERIOD</label>
+<label kind="assignment" x="40" y="-24">x=0</label>
+</transition>
+<transition>
+<source ref="id1"/>
+<target ref="id0"/>
+<label kind="select" x="40" y="40">ds:int[-3,3], sb:int[0,1], inc:int[0,1], dec:int[0,1], can:int[0,1]</label>
+<label kind="synchronisation" x="40" y="56">go!</label>
+<label kind="assignment" x="40" y="72">updateSpeed(ds), setButtonPressed=(sb==1), increaseSpeed=(inc==1), decreaseSpeed=(dec==1), cancelButtonPressed=(can==1)</label>
+</transition>
+</template>
+<template>
+<name>CruiseControl</name>
+<declaration>// Faithful translation of updateCruiseControl(): switch(state) WITH break in every case, // exactly as written in the (corrected) C source -- no fall-through.</declaration>
+<location id="id0" x="0" y="200">
+<name x="-10" y="166">Idle</name>
+</location>
+<location id="id1" x="260" y="0">
+<name x="250" y="-34">CaseOFF</name>
+</location>
+<location id="id2" x="260" y="200">
+<name x="250" y="166">CaseON</name>
+</location>
+<location id="id3" x="260" y="420">
+<name x="250" y="386">CaseHOLD</name>
+</location>
+<committed ref="id1"/>
+<committed ref="id2"/>
+<committed ref="id3"/>
+<init ref="id0"/>
+<transition>
+<source ref="id0"/>
+<target ref="id1"/>
+<label kind="guard" x="-230" y="-60">state==CRUISE_OFF</label>
+<label kind="synchronisation" x="-230" y="-44">go?</label>
+</transition>
+<transition>
+<source ref="id0"/>
+<target ref="id2"/>
+<label kind="guard" x="40" y="170">state==CRUISE_ON</label>
+<label kind="synchronisation" x="40" y="186">go?</label>
+</transition>
+<transition>
+<source ref="id0"/>
+<target ref="id3"/>
+<label kind="guard" x="-230" y="380">state==CRUISE_HOLD</label>
+<label kind="synchronisation" x="-230" y="396">go?</label>
+</transition>
+<transition>
+<source ref="id1"/>
+<target ref="id0"/>
+<label kind="guard" x="-30" y="80">setButtonPressed && currentSpeed>=MIN_SPEED</label>
+<label kind="assignment" x="-30" y="96">desiredSpeed=currentSpeed, state=CRUISE_ON</label>
+</transition>
+<transition>
+<source ref="id1"/>
+<target ref="id0"/>
+<label kind="guard" x="60" y="130">!(setButtonPressed && currentSpeed>=MIN_SPEED)</label>
+</transition>
+<transition>
+<source ref="id2"/>
+<target ref="id0"/>
+<label kind="guard" x="60" y="250">cancelButtonPressed</label>
+<label kind="assignment" x="60" y="266">state=CRUISE_OFF, throttle=0</label>
+</transition>
+<transition>
+<source ref="id2"/>
+<target ref="id0"/>
+<label kind="guard" x="60" y="290">!cancelButtonPressed && increaseSpeed</label>
+<label kind="assignment" x="60" y="306">incDesired()</label>
+</transition>
+<transition>
+<source ref="id2"/>
+<target ref="id0"/>
+<label kind="guard" x="60" y="330">!cancelButtonPressed && !increaseSpeed && decreaseSpeed</label>
+<label kind="assignment" x="60" y="346">decDesired()</label>
+</transition>
+<transition>
+<source ref="id2"/>
+<target ref="id0"/>
+<label kind="guard" x="60" y="370">!cancelButtonPressed && !increaseSpeed && !decreaseSpeed</label>
+<label kind="assignment" x="60" y="386">state=CRUISE_HOLD</label>
+</transition>
+<transition>
+<source ref="id3"/>
+<target ref="id0"/>
+<label kind="guard" x="-190" y="460">cancelButtonPressed</label>
+<label kind="assignment" x="-190" y="476">state=CRUISE_OFF, throttle=0</label>
+</transition>
+<transition>
+<source ref="id3"/>
+<target ref="id0"/>
+<label kind="guard" x="-190" y="500">!cancelButtonPressed</label>
+<label kind="assignment" x="-190" y="516">speedDifference=desiredSpeed-currentSpeed, controlThrottle(speedDifference)</label>
+</transition>
+</template>
+<system> Env = Environment(); Controller = CruiseControl(); system Env, Controller; </system>
+<queries>
+<query>
+<formula>A[] throttle <= THROTTLE_MAX && throttle >= THROTTLE_MIN</formula>
+<comment>Safety: throttle always stays within [THROTTLE_MIN, THROTTLE_MAX] = [0,100], matching the C clamp in controlThrottle().</comment>
+</query>
+<query>
+<formula>A[] desiredSpeed <= MAX_SPEED && desiredSpeed >= MIN_SPEED || state==CRUISE_OFF</formula>
+<comment>Safety: whenever cruise control is engaged (ON or HOLD), desiredSpeed stays within [MIN_SPEED, MAX_SPEED] = [30,150]. (desiredSpeed is only meaningful once cruise control has been engaged at least once; it is 0 at start-up while state==CRUISE_OFF.)</comment>
+</query>
+<query>
+<formula>A[] not deadlock</formula>
+<comment>Liveness/well-formedness: the combined model never deadlocks.</comment>
+</query>
+<query>
+<formula>E<> state == CRUISE_ON</formula>
+<comment>Reachability: the controller can reach CRUISE_ON (i.e. the Set-button activation guard currentSpeed>=MIN_SPEED is satisfiable).</comment>
+</query>
+<query>
+<formula>E<> state == CRUISE_HOLD</formula>
+<comment>Reachability: the controller can reach CRUISE_HOLD (i.e. a full cycle with no button pressed while ON).</comment>
+</query>
+<query>
+<formula>E<> (state == CRUISE_OFF && throttle > 0)</formula>
+<comment>Diagnostic: can throttle be nonzero while cruise control is OFF? Should only be reachable transiently right after a cancel/off transition that doesn't reset throttle in the same step as another engine -- validates throttle==0 discipline.</comment>
+</query>
+<query>
+<formula>A[] (state==CRUISE_OFF) imply (currentSpeed<MIN_SPEED || !setButtonPressed || desiredSpeed<=MAX_SPEED)</formula>
+<comment>Sanity check on the activation guard: engaging cruise control never happens with an out-of-range desiredSpeed.</comment>
+</query>
+<query>
+<formula>E<> (state==CRUISE_ON && cancelButtonPressed)</formula>
+<comment>Reachability: the cancel path out of CRUISE_ON is exercised.</comment>
+</query>
+<query>
+<formula>E<> (state==CRUISE_HOLD && cancelButtonPressed)</formula>
+<comment>Reachability: the cancel path out of CRUISE_HOLD is exercised.</comment>
+</query>
+<query>
+<formula>E<> (desiredSpeed == MAX_SPEED)</formula>
+<comment>Reachability: repeated 'increase' presses can saturate desiredSpeed at MAX_SPEED (150), exercising the clamp in incDesired().</comment>
+</query>
+</queries>
+</nta>

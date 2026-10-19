@@ -1,0 +1,283 @@
+//-----------------------------------------------------------------------------
+// Package: cruise_control_pkg
+//-----------------------------------------------------------------------------
+package cruise_control_pkg;
+
+  typedef enum logic [1:0] {
+    CRUISE_OFF  = 2'd0,
+    CRUISE_ON   = 2'd1,
+    CRUISE_HOLD = 2'd2
+  } cruise_state_e;
+
+endpackage
+
+
+//-----------------------------------------------------------------------------
+// Module: cruise_control
+//
+// Faithful RTL transformation of the C cruise-control state machine.
+//
+// Each clock cycle with update == 1 corresponds to one call to:
+//
+//   updateCruiseControl(setButtonPressed,
+//                       increaseSpeed,
+//                       decreaseSpeed,
+//                       cancelButtonPressed);
+//
+//-----------------------------------------------------------------------------
+module cruise_control
+  import cruise_control_pkg::*;
+#(
+  parameter int  SPEED_W          = 8,
+  parameter int  THROTTLE_W       = 7,
+
+  parameter int  MIN_SPEED        = 30,
+  parameter int  MAX_SPEED        = 150,
+  parameter int  THROTTLE_MIN     = 0,
+  parameter int  THROTTLE_MAX     = 100,
+  parameter int  SPEED_STEP       = 1,
+
+  // 0: faithful to original C code.
+  //    SET uses current_speed directly, even if current_speed > MAX_SPEED.
+  //
+  // 1: safer behavior.
+  //    SET clamps desired_speed to MAX_SPEED.
+  parameter bit  CLAMP_SET_TO_MAX = 0
+) (
+  input  logic                    clk,
+  input  logic                    rst_n,
+
+  // When update is high, the controller performs one C-like update cycle.
+  // Tie high if the control loop runs every clock cycle.
+  input  logic                    update,
+
+  // One-cycle button pulses.
+  input  logic                    set_btn,
+  input  logic                    inc_btn,
+  input  logic                    dec_btn,
+  input  logic                    cancel_btn,
+
+  // Vehicle speed input.
+  input  logic [SPEED_W-1:0]      current_speed,
+
+  // Outputs.
+  output logic [SPEED_W-1:0]      desired_speed,
+  output logic [THROTTLE_W-1:0]   throttle,
+  output cruise_state_e           state,
+  output logic                    cruise_active
+);
+
+  //---------------------------------------------------------------------------
+  // Local parameters
+  //---------------------------------------------------------------------------
+  localparam logic [SPEED_W-1:0]    MIN_SPEED_P    = MIN_SPEED;
+  localparam logic [SPEED_W-1:0]    MAX_SPEED_P    = MAX_SPEED;
+  localparam logic [SPEED_W-1:0]    SPEED_STEP_P   = SPEED_STEP;
+
+  localparam logic [THROTTLE_W-1:0] THROTTLE_MIN_P = THROTTLE_MIN;
+  localparam logic [THROTTLE_W-1:0] THROTTLE_MAX_P = THROTTLE_MAX;
+
+  // Wider speed arithmetic.
+  localparam logic [SPEED_W+1:0]    MIN_SPEED_EXT  = MIN_SPEED;
+  localparam logic [SPEED_W+1:0]    MAX_SPEED_EXT  = MAX_SPEED;
+  localparam logic [SPEED_W+1:0]    SPEED_STEP_EXT = SPEED_STEP;
+  localparam logic [SPEED_W+1:0]    MIN_PLUS_STEP  = MIN_SPEED + SPEED_STEP;
+
+  // Signed arithmetic width for throttle update.
+  localparam int SUM_W = SPEED_W + THROTTLE_W + 2;
+
+  localparam logic signed [SUM_W-1:0] THROTTLE_MIN_S = THROTTLE_MIN;
+  localparam logic signed [SUM_W-1:0] THROTTLE_MAX_S = THROTTLE_MAX;
+
+  //---------------------------------------------------------------------------
+  // Registers
+  //---------------------------------------------------------------------------
+  cruise_state_e           state_q, state_d;
+  logic [SPEED_W-1:0]      desired_speed_q, desired_speed_d;
+  logic [THROTTLE_W-1:0]   throttle_q, throttle_d;
+
+  //---------------------------------------------------------------------------
+  // Combinational arithmetic
+  //---------------------------------------------------------------------------
+  logic [SPEED_W+1:0]       desired_inc;
+  logic signed [SUM_W-1:0]  speed_diff;
+  logic signed [SUM_W-1:0]  throttle_sum;
+
+  //---------------------------------------------------------------------------
+  // Next-state and datapath logic
+  //---------------------------------------------------------------------------
+  always_comb begin
+    // Default: hold current values.
+    state_d         = state_q;
+    desired_speed_d = desired_speed_q;
+    throttle_d      = throttle_q;
+
+    desired_inc     = '0;
+    speed_diff      = '0;
+    throttle_sum    = '0;
+
+    if (update) begin
+      unique case (state_q)
+
+        //---------------------------------------------------------------------
+        // CRUISE_OFF
+        //---------------------------------------------------------------------
+        CRUISE_OFF: begin
+          if (set_btn && (current_speed >= MIN_SPEED_P)) begin
+            if (CLAMP_SET_TO_MAX && (current_speed > MAX_SPEED_P)) begin
+              desired_speed_d = MAX_SPEED_P;
+            end else begin
+              desired_speed_d = current_speed;
+            end
+
+            state_d = CRUISE_ON;
+          end
+        end
+
+        //---------------------------------------------------------------------
+        // CRUISE_ON
+        //---------------------------------------------------------------------
+        CRUISE_ON: begin
+          if (cancel_btn) begin
+            state_d    = CRUISE_OFF;
+            throttle_d = THROTTLE_MIN_P;
+          end
+          else if (inc_btn) begin
+            desired_inc = {2'b0, desired_speed_q} + SPEED_STEP_EXT;
+
+            if (desired_inc > MAX_SPEED_EXT) begin
+              desired_speed_d = MAX_SPEED_P;
+            end else begin
+              desired_speed_d = desired_inc[SPEED_W-1:0];
+            end
+          end
+          else if (dec_btn) begin
+            // Equivalent to C:
+            //   desiredSpeed -= SPEED_STEP;
+            //   if (desiredSpeed < MIN_SPEED) desiredSpeed = MIN_SPEED;
+            if ({2'b0, desired_speed_q} < MIN_PLUS_STEP) begin
+              desired_speed_d = MIN_SPEED_P;
+            end else begin
+              desired_speed_d = desired_speed_q - SPEED_STEP_P;
+            end
+          end
+          else begin
+            state_d = CRUISE_HOLD;
+          end
+        end
+
+        //---------------------------------------------------------------------
+        // CRUISE_HOLD
+        //---------------------------------------------------------------------
+        CRUISE_HOLD: begin
+          if (cancel_btn) begin
+            state_d    = CRUISE_OFF;
+            throttle_d = THROTTLE_MIN_P;
+          end
+          else begin
+            // speedDifference = desiredSpeed - currentSpeed;
+            speed_diff = $signed({1'b0, desired_speed_q})
+                       - $signed({1'b0, current_speed});
+
+            // throttle += speedDifference;
+            throttle_sum = $signed({{(SUM_W-THROTTLE_W){1'b0}}, throttle_q})
+                         + speed_diff;
+
+            // Clamp throttle.
+            if (throttle_sum > THROTTLE_MAX_S) begin
+              throttle_d = THROTTLE_MAX_P;
+            end
+            else if (throttle_sum < THROTTLE_MIN_S) begin
+              throttle_d = THROTTLE_MIN_P;
+            end
+            else begin
+              throttle_d = throttle_sum[THROTTLE_W-1:0];
+            end
+          end
+        end
+
+        //---------------------------------------------------------------------
+        // Illegal state recovery
+        //---------------------------------------------------------------------
+        default: begin
+          state_d         = CRUISE_OFF;
+          desired_speed_d = '0;
+          throttle_d      = THROTTLE_MIN_P;
+        end
+
+      endcase
+    end
+  end
+
+  //---------------------------------------------------------------------------
+  // Sequential state update
+  //---------------------------------------------------------------------------
+  always_ff @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+      state_q         <= CRUISE_OFF;
+      desired_speed_q <= '0;
+      throttle_q      <= THROTTLE_MIN_P;
+    end
+    else begin
+      state_q         <= state_d;
+      desired_speed_q <= desired_speed_d;
+      throttle_q      <= throttle_d;
+    end
+  end
+
+  //---------------------------------------------------------------------------
+  // Outputs
+  //---------------------------------------------------------------------------
+  assign desired_speed = desired_speed_q;
+  assign throttle      = throttle_q;
+  assign state         = state_q;
+  assign cruise_active = (state_q != CRUISE_OFF);
+
+  //---------------------------------------------------------------------------
+  // Simulation / formal assertions
+  //---------------------------------------------------------------------------
+  // synthesis translate_off
+
+  assert property (@(posedge clk) disable iff (!rst_n)
+    throttle <= THROTTLE_MAX_P
+  ) else $error("Assertion failed: throttle exceeded THROTTLE_MAX");
+
+  assert property (@(posedge clk) disable iff (!rst_n)
+    throttle >= THROTTLE_MIN_P
+  ) else $error("Assertion failed: throttle below THROTTLE_MIN");
+
+  assert property (@(posedge clk) disable iff (!rst_n)
+    (state == CRUISE_OFF) |-> (throttle == THROTTLE_MIN_P)
+  ) else $error("Assertion failed: throttle not zero in CRUISE_OFF");
+
+  assert property (@(posedge clk) disable iff (!rst_n)
+    (state != CRUISE_OFF) |-> (desired_speed >= MIN_SPEED_P)
+  ) else $error("Assertion failed: active cruise with desired_speed below MIN_SPEED");
+
+  assert property (@(posedge clk) disable iff (!rst_n)
+    state inside {CRUISE_OFF, CRUISE_ON, CRUISE_HOLD}
+  ) else $error("Assertion failed: illegal state");
+
+  // This assertion is only guaranteed if:
+  //   CLAMP_SET_TO_MAX == 1
+  // or the environment never presents current_speed > MAX_SPEED when SET is pressed.
+  //
+  // assert property (@(posedge clk) disable iff (!rst_n)
+  //   (state != CRUISE_OFF) |-> (desired_speed <= MAX_SPEED_P)
+  // ) else $error("Assertion failed: active cruise with desired_speed above MAX_SPEED");
+
+  cover property (@(posedge clk) disable iff (!rst_n)
+    state == CRUISE_ON
+  );
+
+  cover property (@(posedge clk) disable iff (!rst_n)
+    state == CRUISE_HOLD && throttle != THROTTLE_MIN_P
+  );
+
+  cover property (@(posedge clk) disable iff (!rst_n)
+    state == CRUISE_OFF && desired_speed != '0
+  );
+
+  // synthesis translate_on
+
+endmodule

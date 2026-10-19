@@ -1,0 +1,144 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<dSML:System xmi:version="2.0"
+ xmlns:xmi="http://www.omg.org/XMI"
+ xmlns:dSML="http://www.example.org/dSML">
+
+  <includedirective keyword="#include" name="&lt;stdio.h>"/>
+
+  <comment commentText="// Constants"/>
+  <preprocessordirective keyword="#define" name="DESIRED_SPEED_INCREMENT" value="1"/>
+  <preprocessordirective keyword="#define" name="MAX_SPEED" value="150"/>
+  <preprocessordirective keyword="#define" name="MIN_SPEED" value="30"/>
+  <preprocessordirective keyword="#define" name="THROTTLE_MAX" value="100"/>
+  <preprocessordirective keyword="#define" name="THROTTLE_MIN" value="0"/>
+
+  <declaration>
+    <enum enumID="CruiseState">
+      <enumlist enumItem="CRUISE_OFF"/>
+      <enumlist enumItem="CRUISE_ON"/>
+      <enumlist enumItem="CRUISE_HOLD"/>
+    </enum>
+    <attribute isGlobal="" dataType="int" name="currentSpeed" size="" initialValue="0"/>
+    <attribute isGlobal="" dataType="int" name="desiredSpeed" size="" initialValue="0"/>
+    <attribute isGlobal="" dataType="int" name="throttle" size="" initialValue="0"/>
+    <attribute isGlobal="" dataType="CruiseState" name="state" size="" initialValue="CRUISE_OFF"/>
+  </declaration>
+
+  <component name="readCurrentSpeed" type="int">
+    <statement name="return" value="currentSpeed"/>
+  </component>
+
+  <component name="controlThrottle" type="void">
+    <parameter name="speedDifference" dataType="int" qualifier="" pointer=""/>
+    <statement><if keyword="if" variable="speedDifference" operator="&gt;" value="0">
+      <assignment leftAttribute="throttle" operator="+=" AssignedSide="speedDifference"/>
+    </if></statement>
+    <statement><if keyword="else if" variable="speedDifference" operator="&lt;" value="0">
+      <assignment leftAttribute="throttle" operator="+=" AssignedSide="speedDifference"/>
+    </if></statement>
+    <statement><if keyword="if" variable="throttle" operator="&gt;" value="THROTTLE_MAX">
+      <assignment leftAttribute="throttle" operator="=" AssignedSide="THROTTLE_MAX"/>
+    </if></statement>
+    <statement><if keyword="if" variable="throttle" operator="&lt;" value="THROTTLE_MIN">
+      <assignment leftAttribute="throttle" operator="=" AssignedSide="THROTTLE_MIN"/>
+    </if></statement>
+    <print printText="printf(*Throttle set to: %d%%
+*, throttle);"/>
+  </component>
+
+  <component name="updateCruiseControl" type="void">
+    <parameter name="setButtonPressed" dataType="int" qualifier="" pointer=""/>
+    <parameter name="increaseSpeed" dataType="int" qualifier="" pointer=""/>
+    <parameter name="decreaseSpeed" dataType="int" qualifier="" pointer=""/>
+    <parameter name="cancelButtonPressed" dataType="int" qualifier="" pointer=""/>
+    <declaration><attribute isGlobal="" dataType="int" name="speedDifference" size="" initialValue=""/></declaration>
+
+    <statement><switch keyword="switch" value="state">
+      <switchcase keyword="case" value="CRUISE_OFF">
+        <statement><if keyword="if" variable="setButtonPressed" operator="&amp;&amp;" value="currentSpeed &gt;= MIN_SPEED">
+          <assignment leftAttribute="desiredSpeed" operator="=" AssignedSide="currentSpeed"/>
+          <assignment leftAttribute="state" operator="=" AssignedSide="CRUISE_ON"/>
+          <print printText="printf(*Cruise Control ON. Holding speed at %d km/h
+*, desiredSpeed);"/>
+        </if></statement>
+      </switchcase>
+
+      <switchcase keyword="case" value="CRUISE_ON">
+        <statement><if keyword="if" variable="cancelButtonPressed" operator="" value="">
+          <assignment leftAttribute="state" operator="=" AssignedSide="CRUISE_OFF"/>
+          <assignment leftAttribute="throttle" operator="=" AssignedSide="0"/>
+          <print printText="printf(*Cruise Control OFF
+*);"/>
+        </if></statement>
+        <statement><if keyword="else if" variable="increaseSpeed" operator="" value="">
+          <assignment leftAttribute="desiredSpeed" operator="+=" AssignedSide="DESIRED_SPEED_INCREMENT"/>
+          <statement><if keyword="if" variable="desiredSpeed" operator="&gt;" value="MAX_SPEED">
+            <assignment leftAttribute="desiredSpeed" operator="=" AssignedSide="MAX_SPEED"/>
+          </if></statement>
+          <print printText="printf(*Increasing desired speed to %d km/h
+*, desiredSpeed);"/>
+        </if></statement>
+        <statement><if keyword="else if" variable="decreaseSpeed" operator="" value="">
+          <assignment leftAttribute="desiredSpeed" operator="-=" AssignedSide="DESIRED_SPEED_INCREMENT"/>
+          <statement><if keyword="if" variable="desiredSpeed" operator="&lt;" value="MIN_SPEED">
+            <assignment leftAttribute="desiredSpeed" operator="=" AssignedSide="MIN_SPEED"/>
+          </if></statement>
+          <print printText="printf(*Decreasing desired speed to %d km/h
+*, desiredSpeed);"/>
+        </if></statement>
+        <statement><if keyword="else" variable="" operator="" value="">
+          <assignment leftAttribute="state" operator="=" AssignedSide="CRUISE_HOLD"/>
+        </if></statement>
+      </switchcase>
+
+      <switchcase keyword="case" value="CRUISE_HOLD">
+        <statement><if keyword="if" variable="cancelButtonPressed" operator="" value="">
+          <assignment leftAttribute="state" operator="=" AssignedSide="CRUISE_OFF"/>
+          <assignment leftAttribute="throttle" operator="=" AssignedSide="0"/>
+          <print printText="printf(*Cruise Control OFF
+*);"/>
+        </if></statement>
+        <statement><if keyword="else" variable="" operator="" value="">
+          <assignment leftAttribute="speedDifference" operator="=" AssignedSide="desiredSpeed-currentSpeed"/>
+          <functioncall functionName="controlThrottle" parameterString="speedDifference"/>
+        </if></statement>
+      </switchcase>
+    </switch></statement>
+  </component>
+
+  <component name="main" type="int">
+    <declaration><attribute isGlobal="" dataType="int" name="setButtonPressed" size="" initialValue="0"/></declaration>
+    <declaration><attribute isGlobal="" dataType="int" name="increaseSpeed" size="" initialValue="0"/></declaration>
+    <declaration><attribute isGlobal="" dataType="int" name="decreaseSpeed" size="" initialValue="0"/></declaration>
+    <declaration><attribute isGlobal="" dataType="int" name="cancelButtonPressed" size="" initialValue="0"/></declaration>
+
+    <statement><loop type="for" initial="int i=0" condition="i &lt; 20" increment="i++">
+      <statement><assignment leftAttribute="currentSpeed" operator="=" AssignedSide="readCurrentSpeed()"/></statement>
+      <statement><if keyword="if" variable="i" operator="==" value="2">
+        <assignment leftAttribute="setButtonPressed" operator="=" AssignedSide="1"/>
+      </if></statement>
+      <statement><if keyword="if" variable="i" operator="==" value="5">
+        <assignment leftAttribute="increaseSpeed" operator="=" AssignedSide="1"/>
+      </if></statement>
+      <statement><if keyword="if" variable="i" operator="==" value="7">
+        <assignment leftAttribute="decreaseSpeed" operator="=" AssignedSide="1"/>
+      </if></statement>
+      <statement><if keyword="if" variable="i" operator="==" value="12">
+        <assignment leftAttribute="cancelButtonPressed" operator="=" AssignedSide="1"/>
+      </if></statement>
+      <statement><functioncall functionName="updateCruiseControl" parameterString="setButtonPressed, increaseSpeed, decreaseSpeed, cancelButtonPressed"/></statement>
+      <statement><assignment leftAttribute="setButtonPressed" operator="=" AssignedSide="0"/></statement>
+      <statement><assignment leftAttribute="increaseSpeed" operator="=" AssignedSide="0"/></statement>
+      <statement><assignment leftAttribute="decreaseSpeed" operator="=" AssignedSide="0"/></statement>
+      <statement><assignment leftAttribute="cancelButtonPressed" operator="=" AssignedSide="0"/></statement>
+      <statement><if keyword="if" variable="i" operator="&lt;" value="10">
+        <assignment leftAttribute="currentSpeed" operator="+=" AssignedSide="2"/>
+      </if></statement>
+      <statement><if keyword="else" variable="" operator="" value="">
+        <assignment leftAttribute="currentSpeed" operator="-=" AssignedSide="2"/>
+      </if></statement>
+      <statement><loop type="for volatile" initial="int j=0" condition="j &lt; 1000000" increment="j++"></loop></statement>
+    </loop></statement>
+    <statement name="return" value="0"/>
+  </component>
+</dSML:System>

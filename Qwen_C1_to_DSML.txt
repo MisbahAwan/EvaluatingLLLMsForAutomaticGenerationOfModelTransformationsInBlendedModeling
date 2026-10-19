@@ -1,0 +1,291 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<dSML:System
+    xmi:version="2.0"
+    xmlns:xmi="http://www.omg.org/XMI"
+    xmlns:dSML="http://www.example.org/dSML"
+    name="C1_Casestudy"
+    sourceLanguage="C">
+
+  <!-- Included headers -->
+  <include keyword="#include" name="&lt;stdio.h&gt;"/>
+
+  <!-- Constants -->
+  <define keyword="#define" name="DESIRED_SPEED_INCREMENT" value="1"
+          comment="Speed adjustment step (1 km/h)"/>
+  <define keyword="#define" name="MAX_SPEED" value="150"
+          comment="Maximum allowed speed (in km/h)"/>
+  <define keyword="#define" name="MIN_SPEED" value="30"
+          comment="Minimum allowed speed (in km/h)"/>
+  <define keyword="#define" name="THROTTLE_MAX" value="100"
+          comment="Maximum throttle value (percentage)"/>
+  <define keyword="#define" name="THROTTLE_MIN" value="0"
+          comment="Minimum throttle value (percentage)"/>
+
+  <!-- Enum type -->
+  <enum name="CruiseState" comment="Enum to represent the system state">
+    <item name="CRUISE_OFF"/>
+    <item name="CRUISE_ON"/>
+    <item name="CRUISE_HOLD"/>
+  </enum>
+
+  <!-- Global variables -->
+  <variable name="currentSpeed"
+            dataType="int"
+            isGlobal="true"
+            initialValue="0"
+            comment="Vehicle's current speed (km/h)"/>
+
+  <variable name="desiredSpeed"
+            dataType="int"
+            isGlobal="true"
+            initialValue="0"
+            comment="The speed at which cruise control should maintain (km/h)"/>
+
+  <variable name="throttle"
+            dataType="int"
+            isGlobal="true"
+            initialValue="0"
+            comment="Throttle level (0 to 100%)"/>
+
+  <variable name="state"
+            dataType="CruiseState"
+            isGlobal="true"
+            initialValue="CRUISE_OFF"
+            comment="Initial state is OFF"/>
+
+  <!-- Function: readCurrentSpeed -->
+  <function name="readCurrentSpeed"
+            returnType="int"
+            comment="Function to read the vehicle's current speed (mock function)">
+    <body>
+      <comment text="Simulate reading speed from a sensor"/>
+      <comment text="In real embedded system, this would interface with the vehicle's speed sensor"/>
+      <return expression="currentSpeed"/>
+    </body>
+  </function>
+
+  <!-- Function: controlThrottle -->
+  <function name="controlThrottle"
+            returnType="void"
+            comment="Function to control the throttle">
+    <parameter name="speedDifference" dataType="int"/>
+
+    <body>
+      <if condition="speedDifference &gt; 0">
+        <then>
+          <assign left="throttle" operator="+=" right="speedDifference"/>
+          <comment text="Increase throttle to speed up"/>
+        </then>
+        <elseif condition="speedDifference &lt; 0">
+          <then>
+            <assign left="throttle" operator="+=" right="speedDifference"/>
+            <comment text="Decrease throttle to slow down"/>
+          </then>
+        </elseif>
+      </if>
+
+      <comment text="Clamp throttle to valid range (0% to 100%)"/>
+
+      <if condition="throttle &gt; THROTTLE_MAX">
+        <then>
+          <assign left="throttle" operator="=" right="THROTTLE_MAX"/>
+        </then>
+      </if>
+
+      <if condition="throttle &lt; THROTTLE_MIN">
+        <then>
+          <assign left="throttle" operator="=" right="THROTTLE_MIN"/>
+        </then>
+      </if>
+
+      <print expression="printf(&quot;Throttle set to: %d%%\n&quot;, throttle);"/>
+    </body>
+  </function>
+
+  <!-- Function: updateCruiseControl -->
+  <function name="updateCruiseControl"
+            returnType="void"
+            comment="Function to update the cruise control system state">
+
+    <parameter name="setButtonPressed" dataType="int"/>
+    <parameter name="increaseSpeed" dataType="int"/>
+    <parameter name="decreaseSpeed" dataType="int"/>
+    <parameter name="cancelButtonPressed" dataType="int"/>
+
+    <local dataType="int" name="speedDifference"/>
+
+    <body>
+      <switch expression="state">
+
+        <!-- case CRUISE_OFF -->
+        <case value="CRUISE_OFF">
+          <if condition="setButtonPressed &amp;&amp; currentSpeed &gt;= MIN_SPEED">
+            <then>
+              <assign left="desiredSpeed" operator="=" right="currentSpeed"/>
+              <assign left="state" operator="=" right="CRUISE_ON"/>
+              <print expression="printf(&quot;Cruise Control ON. Holding speed at %d km/h\n&quot;, desiredSpeed);"/>
+            </then>
+          </if>
+          <break/>
+        </case>
+
+        <!-- case CRUISE_ON -->
+        <case value="CRUISE_ON">
+          <if condition="cancelButtonPressed">
+            <then>
+              <assign left="state" operator="=" right="CRUISE_OFF"/>
+              <assign left="throttle" operator="=" right="0"/>
+              <print expression="printf(&quot;Cruise Control OFF\n&quot;);"/>
+            </then>
+
+            <elseif condition="increaseSpeed">
+              <then>
+                <assign left="desiredSpeed" operator="+=" right="DESIRED_SPEED_INCREMENT"/>
+
+                <if condition="desiredSpeed &gt; MAX_SPEED">
+                  <then>
+                    <assign left="desiredSpeed" operator="=" right="MAX_SPEED"/>
+                  </then>
+                </if>
+
+                <print expression="printf(&quot;Increasing desired speed to %d km/h\n&quot;, desiredSpeed);"/>
+              </then>
+            </elseif>
+
+            <elseif condition="decreaseSpeed">
+              <then>
+                <assign left="desiredSpeed" operator="-=" right="DESIRED_SPEED_INCREMENT"/>
+
+                <if condition="desiredSpeed &lt; MIN_SPEED">
+                  <then>
+                    <assign left="desiredSpeed" operator="=" right="MIN_SPEED"/>
+                  </then>
+                </if>
+
+                <print expression="printf(&quot;Decreasing desired speed to %d km/h\n&quot;, desiredSpeed);"/>
+              </then>
+            </elseif>
+
+            <else>
+              <assign left="state" operator="=" right="CRUISE_HOLD"/>
+            </else>
+          </if>
+
+          <break/>
+        </case>
+
+        <!-- case CRUISE_HOLD -->
+        <case value="CRUISE_HOLD">
+          <if condition="cancelButtonPressed">
+            <then>
+              <assign left="state" operator="=" right="CRUISE_OFF"/>
+              <assign left="throttle" operator="=" right="0"/>
+              <print expression="printf(&quot;Cruise Control OFF\n&quot;);"/>
+            </then>
+
+            <else>
+              <comment text="Control the throttle to maintain the desired speed"/>
+              <assign left="speedDifference" operator="=" right="desiredSpeed - currentSpeed"/>
+              <call functionName="controlThrottle" arguments="speedDifference"/>
+            </else>
+          </if>
+
+          <break/>
+        </case>
+
+      </switch>
+    </body>
+  </function>
+
+  <!-- Function: main -->
+  <function name="main"
+            returnType="int"
+            comment="Main function (for simulation)">
+
+    <local dataType="int" name="setButtonPressed" initialValue="0"/>
+    <local dataType="int" name="increaseSpeed" initialValue="0"/>
+    <local dataType="int" name="decreaseSpeed" initialValue="0"/>
+    <local dataType="int" name="cancelButtonPressed" initialValue="0"/>
+
+    <body>
+      <comment text="Simulation loop (replace with actual event-driven logic in real embedded system)"/>
+
+      <loop type="for"
+            initial="int i = 0"
+            condition="i &lt; 20"
+            increment="i++">
+
+        <comment text="Simulate driving conditions (mock input)"/>
+        <assign left="currentSpeed" operator="=" right="readCurrentSpeed()"/>
+        <comment text="Read current speed"/>
+
+        <comment text="Simulate user actions"/>
+
+        <if condition="i == 2">
+          <then>
+            <assign left="setButtonPressed" operator="=" right="1"/>
+          </then>
+        </if>
+        <comment text="Set cruise control on at the 3rd iteration"/>
+
+        <if condition="i == 5">
+          <then>
+            <assign left="increaseSpeed" operator="=" right="1"/>
+          </then>
+        </if>
+        <comment text="Increase desired speed at the 6th iteration"/>
+
+        <if condition="i == 7">
+          <then>
+            <assign left="decreaseSpeed" operator="=" right="1"/>
+          </then>
+        </if>
+        <comment text="Decrease desired speed at the 8th iteration"/>
+
+        <if condition="i == 12">
+          <then>
+            <assign left="cancelButtonPressed" operator="=" right="1"/>
+          </then>
+        </if>
+        <comment text="Cancel cruise control at the 13th iteration"/>
+
+        <comment text="Update cruise control system"/>
+        <call functionName="updateCruiseControl"
+              arguments="setButtonPressed, increaseSpeed, decreaseSpeed, cancelButtonPressed"/>
+
+        <comment text="Reset user actions after handling"/>
+        <assign left="setButtonPressed" operator="=" right="0"/>
+        <assign left="increaseSpeed" operator="=" right="0"/>
+        <assign left="decreaseSpeed" operator="=" right="0"/>
+        <assign left="cancelButtonPressed" operator="=" right="0"/>
+
+        <comment text="Simulate a speed increase/decrease for testing purposes"/>
+
+        <if condition="i &lt; 10">
+          <then>
+            <assign left="currentSpeed" operator="+=" right="2"/>
+          </then>
+          <else>
+            <assign left="currentSpeed" operator="-=" right="2"/>
+          </else>
+        </if>
+
+        <comment text="Simulate speed increase"/>
+        <comment text="Simulate speed decrease"/>
+
+        <comment text="Wait for a bit (simulate time passing)"/>
+
+        <loop type="for"
+              qualifier="volatile"
+              initial="int j = 0"
+              condition="j &lt; 1000000"
+              increment="j++"
+              comment="Simple delay loop"/>
+
+      </loop>
+
+      <return expression="0"/>
+    </body>
+  </function>
+
+</dSML:System>

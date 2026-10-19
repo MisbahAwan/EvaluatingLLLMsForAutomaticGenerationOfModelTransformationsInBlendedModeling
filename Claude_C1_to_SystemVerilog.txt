@@ -1,0 +1,140 @@
+// ============================================================
+// SystemVerilog translation of the Cruise Control embedded C module
+// (source: C1_Casestudy.txt -- updateCruiseControl / controlThrottle)
+//
+// This is a 1:1 structural translation of the C source, which has a
+// break at the end of every case (no fall-through). One call to
+// updateCruiseControl() in C corresponds to one posedge clk here:
+// the whole switch(state) body is treated as combinational logic
+// that is latched synchronously, exactly like the "one call per
+// sampling period" semantics used in the companion UPPAAL model.
+// ============================================================
+
+// ---- State encoding: typedef enum {CRUISE_OFF, CRUISE_ON, CRUISE_HOLD} CruiseState; ----
+typedef enum logic [1:0] {
+    CRUISE_OFF  = 2'd0,
+    CRUISE_ON   = 2'd1,
+    CRUISE_HOLD = 2'd2
+} cruise_state_t;
+
+module cruise_control #(
+    // ---- Constants: #define in the C source ----
+    parameter int DESIRED_SPEED_INCREMENT = 1,
+    parameter int MAX_SPEED    = 150,
+    parameter int MIN_SPEED    = 30,
+    parameter int THROTTLE_MAX = 100,
+    parameter int THROTTLE_MIN = 0
+) (
+    input  logic          clk,
+    input  logic          rst_n,            // active-low synchronous reset
+
+    // ---- Inputs: mirrors readCurrentSpeed() result + updateCruiseControl() args ----
+    input  int            currentSpeed,     // km/h, from speed sensor (mock in C)
+    input  logic          setButtonPressed,
+    input  logic          increaseSpeed,
+    input  logic          decreaseSpeed,
+    input  logic          cancelButtonPressed,
+
+    // ---- Outputs: mirrors the C globals state / desiredSpeed / throttle ----
+    output cruise_state_t state,
+    output int            desiredSpeed,
+    output int            throttle
+);
+
+    // ------------------------------------------------------------
+    // controlThrottle(int speedDifference) -- translated 1:1,
+    // including the redundant if(diff>0)/else if(diff<0) structure
+    // from the source (functionally just t += diff), followed by
+    // the clamp to [THROTTLE_MIN, THROTTLE_MAX].
+    // ------------------------------------------------------------
+    function automatic int controlThrottle(int t, int diff);
+        int result;
+        result = t;
+        if (diff > 0)      result = result + diff;
+        else if (diff < 0) result = result + diff;
+        if (result > THROTTLE_MAX) result = THROTTLE_MAX;
+        if (result < THROTTLE_MIN) result = THROTTLE_MIN;
+        return result;
+    endfunction
+
+    // ------------------------------------------------------------
+    // Main sequential process -- one invocation per clock edge,
+    // structurally identical to switch(state){ case ...: ... break; }
+    // ------------------------------------------------------------
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            // Mirrors the C global initialisers: state=CRUISE_OFF, desiredSpeed=0, throttle=0
+            state        <= CRUISE_OFF;
+            desiredSpeed <= 0;
+            throttle     <= 0;
+        end else begin
+            unique case (state)
+
+                // ---- case CRUISE_OFF: ----
+                CRUISE_OFF: begin
+                    if (setButtonPressed && (currentSpeed >= MIN_SPEED)) begin
+                        desiredSpeed <= currentSpeed;
+                        state        <= CRUISE_ON;
+                    end
+                    // break -- no other branch/case executes this cycle
+                end
+
+                // ---- case CRUISE_ON: ----
+                CRUISE_ON: begin
+                    if (cancelButtonPressed) begin
+                        state    <= CRUISE_OFF;
+                        throttle <= 0;
+                    end else if (increaseSpeed) begin
+                        desiredSpeed <= (desiredSpeed + DESIRED_SPEED_INCREMENT > MAX_SPEED)
+                                        ? MAX_SPEED
+                                        : desiredSpeed + DESIRED_SPEED_INCREMENT;
+                    end else if (decreaseSpeed) begin
+                        desiredSpeed <= (desiredSpeed - DESIRED_SPEED_INCREMENT < MIN_SPEED)
+                                        ? MIN_SPEED
+                                        : desiredSpeed - DESIRED_SPEED_INCREMENT;
+                    end else begin
+                        state <= CRUISE_HOLD;
+                    end
+                end
+
+                // ---- case CRUISE_HOLD: ----
+                CRUISE_HOLD: begin
+                    if (cancelButtonPressed) begin
+                        state    <= CRUISE_OFF;
+                        throttle <= 0;
+                    end else begin
+                        throttle <= controlThrottle(throttle, desiredSpeed - currentSpeed);
+                    end
+                end
+
+                default: state <= CRUISE_OFF;
+            endcase
+        end
+    end
+
+    // ------------------------------------------------------------
+    // SVA assertions -- mirror the UPPAAL model's safety queries,
+    // so all three representations (C / UPPAAL / SystemVerilog) can
+    // be checked against the same properties.
+    // ------------------------------------------------------------
+
+    // Mirrors UPPAAL query 1: A[] throttle <= THROTTLE_MAX && throttle >= THROTTLE_MIN
+    a_throttle_range: assert property (
+        @(posedge clk) disable iff (!rst_n)
+        throttle <= THROTTLE_MAX && throttle >= THROTTLE_MIN
+    ) else $error("throttle out of range: %0d", throttle);
+
+    // Mirrors UPPAAL query 2: desiredSpeed in [MIN_SPEED, MAX_SPEED] once engaged
+    a_desired_speed_range: assert property (
+        @(posedge clk) disable iff (!rst_n)
+        (state == CRUISE_OFF) || (desiredSpeed <= MAX_SPEED && desiredSpeed >= MIN_SPEED)
+    ) else $error("desiredSpeed out of range: %0d (state=%s)", desiredSpeed, state.name());
+
+    // Mirrors UPPAAL query 7: engaging CC never happens with an out-of-range activation
+    a_activation_guard: assert property (
+        @(posedge clk) disable iff (!rst_n)
+        (state == CRUISE_OFF) |->
+            (currentSpeed < MIN_SPEED || !setButtonPressed || desiredSpeed <= MAX_SPEED)
+    );
+
+endmodule
